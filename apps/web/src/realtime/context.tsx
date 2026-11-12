@@ -104,6 +104,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 import { useTranslation } from "react-i18next";
 import { useApi } from "@/api/context";
 import { checkAppVersion } from "@/lib/app-version";
+import { awayWatch } from "@/lib/away";
 import { desktopNotice, inDesktopApp, thisMac } from "@/lib/desktop";
 import { feedIsland, island } from "@/lib/island";
 import { notificationAudience } from "@/lib/sounds";
@@ -567,7 +568,10 @@ export function RealtimeProvider({
     const offError = conn.onError((code) => {
       if (code === "membership_revoked") void qc.invalidateQueries({ queryKey: keys.me });
     });
-    conn.start();
+    // A tab nobody is using closes its socket (`lib/away.ts`); back, it opens again and reads again (`onReconnect`).
+    const offActivity = conn.onActivity(() => awayWatch.heard());
+    const offAway = awayWatch.subscribe((away) => (away ? conn.stop() : conn.start()));
+    if (!awayWatch.away) conn.start();
     setConnection(conn);
     // Back from a sleep or a network change, the socket may be dead while it still says open: check it now.
     const wake = () => {
@@ -580,6 +584,8 @@ export function RealtimeProvider({
       island.clear();
       document.removeEventListener("visibilitychange", wake);
       window.removeEventListener("online", wake);
+      offActivity();
+      offAway();
       offReconnect();
       offOpen();
       offUser();

@@ -162,6 +162,7 @@ export class RealtimeConnection {
   private readonly errorListeners = new Set<(code: string, channelId?: string) => void>();
   private readonly userListeners = new Set<(event: UserEvent) => void>();
   private readonly browserListeners = new Set<(frame: Record<string, unknown>) => void>();
+  private readonly activityListeners = new Set<() => void>();
   /** Each watched browser's frame socket, by agent. */
   private readonly frameSockets = new Map<string, SocketLike>();
   /**
@@ -419,6 +420,7 @@ export class RealtimeConnection {
       const bytes = frameBytesOf(ev.data);
       const decoded = bytes ? decodeBrowserFrameBytes(bytes) : null;
       if (!decoded) return;
+      for (const l of this.activityListeners) l();
       // It works: a later close asks again from the shortest wait.
       this.stopRenewal(agentId);
       const at = decoded.metadata.capturedAt;
@@ -546,6 +548,17 @@ export class RealtimeConnection {
     return this.socket !== null && this.socket.readyState === OPEN;
   }
 
+  /**
+   * Told of everything the workspace sends that an app shows (events, an agent browser's frames), not of the
+   * socket's own housekeeping (`ready`, `subscribed`, `pong`): what tells an app the workspace is busy.
+   */
+  onActivity(listener: () => void) {
+    this.activityListeners.add(listener);
+    return () => {
+      this.activityListeners.delete(listener);
+    };
+  }
+
   onError(listener: (code: string, channelId?: string) => void) {
     this.errorListeners.add(listener);
     return () => {
@@ -598,6 +611,7 @@ export class RealtimeConnection {
 
   private handle(frame: ServerFrame | null) {
     if (!frame) return;
+    if (frame.type === "event" || frame.type.startsWith("browser.")) for (const l of this.activityListeners) l();
     if (frame.type.startsWith("browser.") || (frame.type === "error" && typeof frame.agentId === "string")) {
       if (frame.type === "browser.frames" && typeof frame.agentId === "string") {
         const ticket = (frame as { ticket?: unknown }).ticket;

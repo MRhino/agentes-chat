@@ -23,6 +23,7 @@ import {
   startVersionWatch,
   VERSION_CHECK_MS,
 } from "./lib/app-version";
+import { awayWatch, startAwayWatch } from "./lib/away";
 import { applyDesktopDevice, askForPhone, asksForPhone, desktopPlatform } from "./lib/desktop";
 import { tolerateForeignDomEdits } from "./lib/dom-guard";
 import { announceConfirmation, emailConfirmedToast } from "./lib/email-confirmation";
@@ -152,7 +153,14 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("online", () => void checkAppVersion());
 document.addEventListener("copy", copyPillAddresses);
-setInterval(() => void checkAppVersion(), VERSION_CHECK_MS);
+// A tab nobody is using asks nothing (`lib/away.ts`): it checks when the person is back.
+startAwayWatch();
+setInterval(() => {
+  if (!awayWatch.away) void checkAppVersion();
+}, VERSION_CHECK_MS);
+awayWatch.subscribe((away) => {
+  if (!away) void checkAppVersion();
+});
 
 // Back from a provider's sign-in that didn't connect (a connector, the GitHub App, a mailbox): why, once.
 showReturnNotices(i18n.t, toasts.show);
