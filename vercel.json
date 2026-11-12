@@ -1,11 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "bun",
-  "bunVersion": "1.4.x",
+  "framework": "container",
   "regions": [
     "syd1"
   ],
-  "buildCommand": "bun run --filter '@agenteschat/web' build",
   "daemons": {
     "worker": {
       "root": ".",

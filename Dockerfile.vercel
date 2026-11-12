@@ -1,0 +1,19 @@
+# The app, its API and its sockets as a Vercel container function (`SERVER_ROLE=web`): the same build as the
+# Dockerfile, which the worker daemon runs with every role (vercel.json). A function lives only while a request is
+# in flight, so it runs no jobs.
+FROM oven/bun:1.4.4
+WORKDIR /app
+COPY . .
+RUN bun install --frozen-lockfile \
+ && bun run --filter '@agenteschat/web' build \
+ && bun build apps/server/runner/main.ts --target=node --banner '#!/usr/bin/env node' --outfile apps/web/dist/runner/agentes-runner.mjs
+ENV NODE_ENV=production \
+    WEB_DIR=/app/apps/web/dist \
+    SERVER_ROLE=web \
+    DATABASE_POOL_MAX=5 \
+    PORT=3000
+USER bun
+EXPOSE 3000
+# Neon's integration names the direct address apart from the pooled one; LISTEN/NOTIFY and the migrations' lock
+# need the direct one.
+ENTRYPOINT ["sh", "-c", "DATABASE_URL=\"${DATABASE_URL:-$NEON_DATABASE_URL_UNPOOLED}\" exec bun /app/apps/server/src/main.ts"]
