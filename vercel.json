@@ -41,7 +41,7 @@
         "zeroConfig": true,
         "middleware": true,
         "middlewareMatcher": [
-          "/((?!assets/|email/).*)"
+          "/(.*)"
         ]
       }
     },
