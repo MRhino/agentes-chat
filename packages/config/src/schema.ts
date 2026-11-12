@@ -990,6 +990,12 @@ export const envVars = {
     description: "The JSON body that switches the job runner off at `WORKER_WAKE_URL`.",
     section: "Server",
   },
+  WORKER_IDLE_SLEEP_SECONDS: {
+    schema: z.coerce.number().int().min(30).default(300),
+    description:
+      "With `WORKER_WAKE_URL` on a process that runs jobs: after this many seconds with no job running or due and no run in progress, it switches itself off with `WORKER_SLEEP_BODY`.",
+    section: "Server",
+  },
   OPERATOR_API_TOKEN: {
     schema: z
       .string()

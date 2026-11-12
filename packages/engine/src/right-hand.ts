@@ -1,5 +1,17 @@
-import { LOCKED_BRAIN_PROTOCOL } from "@agenteschat/adapters";
-import { and, type Database, type Executor, eq, isNotNull, isNull, type SQL, schema, sql } from "@agenteschat/db";
+import { HEARTBEAT_MS, LOCKED_BRAIN_PROTOCOL } from "@agenteschat/adapters";
+import {
+  and,
+  type Database,
+  desc,
+  type Executor,
+  eq,
+  isNotNull,
+  isNull,
+  ne,
+  type SQL,
+  schema,
+  sql,
+} from "@agenteschat/db";
 import { serverText } from "@agenteschat/i18n";
 import { appLocale } from "@agenteschat/i18n/locale";
 import { AUTO_MODEL } from "@agenteschat/providers";
@@ -337,20 +349,92 @@ export async function thinkingAgent<T extends ThinkingAgent>(
 ): Promise<T> {
   if (!isRightHand(agent)) return agent;
   const { agent: base, own } = await withPersonalBrain(db, agent, person);
-  const [plan] = base.brainAccountId
+  const [chosen] = base.brainAccountId
     ? await db
-        .select({ machineId: machineAccounts.machineId, ownerId: machineAccounts.createdBy })
+        .select({
+          id: machineAccounts.id,
+          machineId: machineAccounts.machineId,
+          ownerId: machineAccounts.createdBy,
+          kind: machineAccounts.kind,
+          email: machineAccounts.email,
+          provider: machineAccounts.provider,
+        })
         .from(machineAccounts)
         .where(and(eq(machineAccounts.orgId, agent.orgId), eq(machineAccounts.id, base.brainAccountId)))
     : [];
+  const plan = chosen ? ((await sameSignInOnline(db, agent.orgId, chosen)) ?? chosen) : undefined;
   const ownerUserId = plan?.ownerId ?? null;
   return {
     ...base,
+    ...(plan && { brainAccountId: plan.id }),
     machineId: plan?.machineId ?? null,
     ownerUserId,
     // "Atende outras pessoas" is the workspace's plan's switch: a person's own serves that person.
     ...(own ? { planForOthers: base.brainAccountLentBy != null || ownerUserId === person } : {}),
   };
+}
+
+/** A computer that answers now, as `machineOnline` reads its row (which imports this file). */
+const answersNow = () =>
+  and(
+    eq(schema.machines.online, true),
+    isNull(schema.machines.deletedAt),
+    sql`${schema.machines.lastSeenAt} > now() - make_interval(secs => ${(3 * HEARTBEAT_MS) / 1000}::double precision)`,
+  );
+
+/**
+ * The right hand is on no computer, so when the computer of its plan's sign-in is away it thinks on another one where
+ * the same person signed in to the same account (same kind, provider and email): the sign-in used there last. Not
+ * another account: the same one, on a computer that answers. Undefined when the chosen computer answers, or when no
+ * other does.
+ */
+async function sameSignInOnline(
+  db: Executor,
+  orgId: string,
+  chosen: {
+    id: string;
+    machineId: string;
+    ownerId: string | null;
+    kind: string;
+    email: string | null;
+    provider: string | null;
+  },
+) {
+  if (!chosen.ownerId || !chosen.email) return undefined;
+  const [here] = await db
+    .select({ id: schema.machines.id })
+    .from(schema.machines)
+    .where(and(eq(schema.machines.orgId, orgId), eq(schema.machines.id, chosen.machineId), answersNow()));
+  if (here) return undefined;
+  const [other] = await db
+    .select({
+      id: machineAccounts.id,
+      machineId: machineAccounts.machineId,
+      ownerId: machineAccounts.createdBy,
+      kind: machineAccounts.kind,
+      email: machineAccounts.email,
+      provider: machineAccounts.provider,
+    })
+    .from(machineAccounts)
+    .innerJoin(
+      schema.machines,
+      and(eq(schema.machines.orgId, machineAccounts.orgId), eq(schema.machines.id, machineAccounts.machineId)),
+    )
+    .where(
+      and(
+        eq(machineAccounts.orgId, orgId),
+        ne(machineAccounts.id, chosen.id),
+        eq(machineAccounts.kind, chosen.kind),
+        eq(machineAccounts.createdBy, chosen.ownerId),
+        eq(machineAccounts.email, chosen.email),
+        chosen.provider ? eq(machineAccounts.provider, chosen.provider) : isNull(machineAccounts.provider),
+        eq(machineAccounts.status, "active"),
+        answersNow(),
+      ),
+    )
+    .orderBy(desc(machineAccounts.lastUsedAt))
+    .limit(1);
+  return other;
 }
 
 /** The person whose own AI a right hand's run thinks with (`thinkingAgent`); null for any other agent's run. */

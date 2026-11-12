@@ -103,6 +103,7 @@ import { createStreamSockets } from "./realtime/streams";
 import { createRealtime, type SocketData } from "./realtime/ws";
 import { workerHealth } from "./routes/health";
 import { startTelemetry } from "./telemetry";
+import { sleepWhenIdle, watchForWaitingWork } from "./idle-sleep";
 import { createWorkerSwitch } from "./worker-switch";
 import { releaseOf, version } from "./version";
 import { startWorkers } from "./workers";
@@ -509,6 +510,17 @@ async function boot(
     ...(web && workerSwitch && { onWake: () => workerSwitch.wake() }),
     log,
   });
+  // A job runner that is switched off while idle: it switches itself off, and a process without jobs switches it on.
+  const stopIdleWatch = !workerSwitch
+    ? null
+    : web
+      ? watchForWaitingWork({ db: database.db, log, switch: workerSwitch })
+      : sleepWhenIdle({
+          db: database.db,
+          log,
+          switch: workerSwitch,
+          idleMs: config.WORKER_IDLE_SLEEP_SECONDS * 1000,
+        });
   const telemetry = worker || web ? null : startTelemetry({ db: database.db, config, log });
 
   const auth = createAuth({
@@ -640,6 +652,7 @@ async function boot(
     stopping = true;
     log.info("shutting down", { signal });
     // No new jobs, from now on: one started during the delay below would be cut by the drain.
+    stopIdleWatch?.();
     workers.stop();
     // `/api/health` answers 503 from now on: the proxy's health check takes this instance out before it stops
     // listening, and holds new requests for the next one instead of failing them.
