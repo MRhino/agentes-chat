@@ -32,5 +32,18 @@
         "failureThreshold": 5
       }
     }
-  }
+  },
+  "builds": [
+    {
+      "src": "Dockerfile.vercel",
+      "use": "@vercel/container",
+      "config": {
+        "functions": {
+          "Dockerfile.vercel": {
+            "maxConcurrency": 500
+          }
+        }
+      }
+    }
+  ]
 }
