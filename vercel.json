@@ -2,12 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "bunVersion": "1.4.x",
   "buildCommand": "bun run --filter '@agenteschat/web' build",
-  "functions": {
-    "server.ts": {
-      "maxDuration": 800,
-      "includeFiles": "{apps/web/dist/**,packages/db/migrations/**}"
-    }
-  },
   "daemons": {
     "worker": {
       "root": ".",
@@ -17,11 +11,20 @@
         "-c",
         "DATABASE_URL=\"${DATABASE_URL:-$NEON_DATABASE_URL_UNPOOLED}\" exec bun /app/apps/server/src/main.ts"
       ],
-      "instances": { "iad1": 0 },
-      "resources": { "requests": { "memory": "2Gi" } },
+      "instances": {
+        "iad1": 0
+      },
+      "resources": {
+        "requests": {
+          "memory": "2Gi"
+        }
+      },
       "terminationGracePeriodSeconds": 120,
       "livenessProbe": {
-        "httpGet": { "port": 3000, "path": "/api/health" },
+        "httpGet": {
+          "port": 3000,
+          "path": "/api/health"
+        },
         "initialDelaySeconds": 180,
         "periodSeconds": 30,
         "failureThreshold": 5
