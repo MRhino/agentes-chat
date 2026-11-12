@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "bunVersion": "1.4.x",
+  "regions": [
+    "syd1"
+  ],
   "buildCommand": "bun run --filter '@agenteschat/web' build",
   "daemons": {
     "worker": {
@@ -12,7 +15,7 @@
         "DATABASE_URL=\"${DATABASE_URL:-$NEON_DATABASE_URL_UNPOOLED}\" exec bun /app/apps/server/src/main.ts"
       ],
       "instances": {
-        "iad1": 0
+        "syd1": 0
       },
       "resources": {
         "requests": {
