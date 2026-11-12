@@ -127,9 +127,9 @@ export const envVars = {
     section: "Server",
   },
   SERVER_ROLE: {
-    schema: z.enum(["all", "worker"]).default("all"),
+    schema: z.enum(["all", "worker", "web"]).default("all"),
     description:
-      "What this process does. `all` (default): serves the app and its API, and runs jobs. `worker`: only runs jobs (agents' runs, routines, notifications, emails; pushes stay with the app, which knows who has it open), and answers nothing over HTTP but its health check (`/api/health` on `PORT`). When jobs keep waiting for a slot (the log says so), start one more process with `SERVER_ROLE=worker` and the same settings: jobs share out across every process on the database, each workspace taking its turn. Processes booting together take turns on the migrations; a worker may leave them to the app (`RUN_MIGRATIONS_ON_BOOT=false`). Needs a PostgreSQL database, not the built-in one.",
+      "What this process does. `all` (default): serves the app and its API, and runs jobs. `web`: serves the app, its API and its sockets and runs no jobs at all, for a host that only lives while a request is in flight; another process on the same database (`all` or `worker`) runs them, woken through `WORKER_WAKE_URL` when it sleeps. Needs a PostgreSQL database. `worker`: only runs jobs (agents' runs, routines, notifications, emails; pushes stay with the app, which knows who has it open), and answers nothing over HTTP but its health check (`/api/health` on `PORT`). When jobs keep waiting for a slot (the log says so), start one more process with `SERVER_ROLE=worker` and the same settings: jobs share out across every process on the database, each workspace taking its turn. Processes booting together take turns on the migrations; a worker may leave them to the app (`RUN_MIGRATIONS_ON_BOOT=false`). Needs a PostgreSQL database, not the built-in one.",
     section: "Server",
   },
   DATABASE_URL: {
@@ -956,6 +956,29 @@ export const envVars = {
     description:
       "GitHub repository (`owner/repo`) whose releases tagged `desktop-v<version>` hold the desktop app, and `v<version>` the packages without Docker.",
     section: "Sandbox",
+  },
+  WORKER_WAKE_URL: {
+    schema: z.string().url().optional(),
+    description:
+      "For a process that runs no jobs (`SERVER_ROLE=web`) beside a job runner that is switched off while idle: the address called, with `PUT` and `WORKER_WAKE_BODY`, when work is queued and that runner may be asleep. With Vercel Daemons, the instance-count override of the daemon: `https://api.vercel.com/v1/projects/<project>/daemons/<daemon>/instances?teamId=<team>`. The same address, with `WORKER_SLEEP_BODY`, is what an idle runner calls to switch itself off (`WORKER_IDLE_SLEEP_SECONDS`). Unset: nothing is called.",
+    section: "Server",
+    example: "https://api.vercel.com/v1/projects/prj_x/daemons/worker/instances?teamId=team_x",
+  },
+  WORKER_WAKE_TOKEN: {
+    schema: z.string().min(1).optional(),
+    description: "Sent as `Authorization: Bearer` to `WORKER_WAKE_URL`.",
+    section: "Server",
+    secret: true,
+  },
+  WORKER_WAKE_BODY: {
+    schema: z.string().default('{"iad1":1}'),
+    description: "The JSON body that switches the job runner on at `WORKER_WAKE_URL`.",
+    section: "Server",
+  },
+  WORKER_SLEEP_BODY: {
+    schema: z.string().default('{"iad1":0}'),
+    description: "The JSON body that switches the job runner off at `WORKER_WAKE_URL`.",
+    section: "Server",
   },
   OPERATOR_API_TOKEN: {
     schema: z

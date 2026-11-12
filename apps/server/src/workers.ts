@@ -136,6 +136,13 @@ export interface WorkerDeps {
   outbox?: { maxInFlight: number; quickSlots: number; limits?: LaneLimits; memoryBytes?: number; skipKinds?: string[] };
   /** The database is the built-in one (one process): the alarms advise what fits it. */
   builtInDatabase?: boolean;
+  /**
+   * False (`SERVER_ROLE=web`): this process runs no jobs and none of the periodic work; it only tells the
+   * processes that do that work is queued, and keeps what every process keeps for itself.
+   */
+  jobs?: boolean;
+  /** Called on every `wakeAll`: work was queued, and the process that runs it may be switched off. */
+  onWake?: () => void;
   log: Logger;
   workerId?: string;
 }
@@ -202,6 +209,7 @@ export const WORKER_INTERVALS_MS = {
  */
 export function startWorkers(deps: WorkerDeps) {
   const { db, log } = deps;
+  if (deps.jobs === false) return startWithoutJobs(deps);
   const workerId = deps.workerId ?? `${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
   const timers: Timer[] = [];
   const ticks = new Map<string, () => Promise<void>>();
@@ -484,6 +492,7 @@ export function startWorkers(deps: WorkerDeps) {
     wakeAll() {
       void ticks.get("outbox")?.();
       void deps.pubsub.publish(WAKE_TOPIC, { type: "wake" }).catch(() => {});
+      deps.onWake?.();
     },
     stop() {
       stopped = true;
@@ -498,6 +507,36 @@ export function startWorkers(deps: WorkerDeps) {
     async drain(until: Promise<unknown>) {
       await Promise.race([outboxPump.idle(), until]);
       return releaseJobs(db, workerId);
+    },
+  };
+}
+
+/**
+ * `SERVER_ROLE=web`: no job pump and no periodic work, which a host that pauses a process between requests would
+ * run late or never. What stays is what each process does for itself: its copy of the plans' models, and
+ * aborting a run a person canceled (none runs here, so it only listens).
+ */
+function startWithoutJobs(deps: WorkerDeps) {
+  const { log } = deps;
+  const refresh = () =>
+    void refreshPlanModels().catch((error: unknown) =>
+      log.error("background job failed", { job: "planModels", error }),
+    );
+  const timer = setInterval(refresh, WORKER_INTERVALS_MS.planModels);
+  refresh();
+  const offCancel = listenForRunCancels(deps.pubsub);
+  return {
+    wake() {},
+    wakeAll() {
+      void deps.pubsub.publish(WAKE_TOPIC, { type: "wake" }).catch(() => {});
+      deps.onWake?.();
+    },
+    stop() {
+      offCancel();
+      clearInterval(timer);
+    },
+    async drain(_until: Promise<unknown>) {
+      return 0;
     },
   };
 }

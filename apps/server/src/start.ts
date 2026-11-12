@@ -103,6 +103,7 @@ import { createStreamSockets } from "./realtime/streams";
 import { createRealtime, type SocketData } from "./realtime/ws";
 import { workerHealth } from "./routes/health";
 import { startTelemetry } from "./telemetry";
+import { createWorkerSwitch } from "./worker-switch";
 import { releaseOf, version } from "./version";
 import { startWorkers } from "./workers";
 
@@ -126,6 +127,11 @@ export interface StartOptions {
    * page that points a name of its own at 127.0.0.1 (DNS rebinding) would otherwise reach it.
    */
   ownHostsOnly?: boolean;
+  /**
+   * What opens the listener, when it isn't `Bun.serve` called here: a host that finds the server by the
+   * `Bun.serve` call in its entry file (Vercel's Bun runtime) gets it called there.
+   */
+  serve?: typeof Bun.serve;
 }
 
 /**
@@ -172,7 +178,8 @@ export async function startServer(options: StartOptions) {
   try {
     const started = await boot(options, config, log, release, errors);
     // Once it serves: a boot's own long steps (migrations, the built-in database's start) aren't what it is for.
-    startFreezeWatch(
+    // Not where the host pauses the process between requests (`SERVER_ROLE=web`): every pause would read as a freeze.
+    if (config.SERVER_ROLE !== "web") startFreezeWatch(
       {
         logLevel: config.LOG_LEVEL,
         ...(config.SENTRY_DSN
@@ -191,7 +198,7 @@ export async function startServer(options: StartOptions) {
 
 /** Everything of the boot after the config, so `startServer` can report what fails in it. */
 async function boot(
-  { edition, modules = [], ownHostsOnly = false }: StartOptions,
+  { edition, modules = [], ownHostsOnly = false, serve = Bun.serve }: StartOptions,
   config: Config,
   log: Logger,
   release: string,
@@ -440,6 +447,9 @@ async function boot(
   // A worker (`SERVER_ROLE=worker`) runs jobs only: no app, API, sockets or usage report, its health check alone. Its
   // runs reach computers through the process that holds their socket (`machine_rpc`).
   const worker = config.SERVER_ROLE === "worker";
+  // `SERVER_ROLE=web`: the app, its API and its sockets, and no jobs: a job runner on the same database has them.
+  const web = config.SERVER_ROLE === "web";
+  const workerSwitch = createWorkerSwitch(config, log);
   const slots = { quick: config.OUTBOX_QUICK_SLOTS, long: config.OUTBOX_MAX_IN_FLIGHT - config.OUTBOX_QUICK_SLOTS };
   const memoryBytes = memoryBudget({
     limitBytes: process.constrainedMemory() || totalmem(),
@@ -478,9 +488,12 @@ async function boot(
       : {}),
     outbox,
     builtInDatabase: !database.client,
+    jobs: !web,
+    // Only a process that runs no jobs wakes the one that does: a job runner that queues work is awake.
+    ...(web && workerSwitch && { onWake: () => workerSwitch.wake() }),
     log,
   });
-  const telemetry = worker ? null : startTelemetry({ db: database.db, config, log });
+  const telemetry = worker || web ? null : startTelemetry({ db: database.db, config, log });
 
   const auth = createAuth({
     db: database.db,
@@ -568,7 +581,7 @@ async function boot(
           draining: () => stopping,
         }),
       })
-    : Bun.serve<SocketData>({
+    : serve<SocketData>({
         hostname: config.HOST,
         port: config.PORT,
         // Bun's default (10 s) cuts a request still waiting on its answer: opening a site in an agent's
@@ -585,9 +598,10 @@ async function boot(
   log.info(worker ? "running jobs only, answering /api/health alone (SERVER_ROLE=worker)" : "listening", {
     url: `http://${config.HOST}:${config.PORT}`,
   });
-  const operator = worker
-    ? null
-    : serveOperatorApi({
+  const operator =
+    worker || web
+      ? null
+      : serveOperatorApi({
         db: database.db,
         config,
         version: release,
