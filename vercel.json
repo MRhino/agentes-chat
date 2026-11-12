@@ -35,6 +35,17 @@
   },
   "builds": [
     {
+      "src": "vercel/gate.js",
+      "use": "@vercel/node",
+      "config": {
+        "zeroConfig": true,
+        "middleware": true,
+        "middlewareMatcher": [
+          "/((?!assets/|email/).*)"
+        ]
+      }
+    },
+    {
       "src": "Dockerfile.vercel",
       "use": "@vercel/container",
       "config": {
