@@ -16,4 +16,4 @@ USER bun
 EXPOSE 3000
 # Neon's integration names the direct address apart from the pooled one; LISTEN/NOTIFY and the migrations' lock
 # need the direct one.
-ENTRYPOINT ["sh", "-c", "DATABASE_URL=\"${DATABASE_URL:-$NEON_DATABASE_URL_UNPOOLED}\" exec bun /app/apps/server/src/main.ts"]
+ENTRYPOINT ["sh", "-c", "DATABASE_URL=\"${DATABASE_URL:-$NEON_DATABASE_URL_UNPOOLED}\" DATABASE_POOLED_URL=\"${DATABASE_POOLED_URL:-$NEON_DATABASE_URL}\" exec bun /app/apps/server/src/main.ts"]

@@ -145,6 +145,16 @@ export const envVars = {
     example: "postgres://agenteschat:password@db.example.com:5432/agenteschat?sslmode=require",
     secret: true,
   },
+  DATABASE_POOLED_URL: {
+    schema: z
+      .string()
+      .regex(/^postgres(ql)?:\/\//, "must be a postgres:// or postgresql:// URL")
+      .optional(),
+    description:
+      "The same database through a transaction pooler (PgBouncer, Neon's `-pooler` address). When set, queries go through it and only LISTEN and the migrations stay on `DATABASE_URL`, so each process holds one direct connection instead of a pool of them. For hosts that run many short-lived processes.",
+    section: "Database",
+    secret: true,
+  },
   DATABASE_POOL_MAX: {
     schema: z.coerce.number().int().min(1).default(20),
     description:

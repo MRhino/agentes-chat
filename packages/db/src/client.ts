@@ -31,12 +31,19 @@ export const migrationsFolder = resolve(import.meta.dir, "../migrations");
 export interface DatabaseOptions {
   url: string;
   poolMax: number;
+  /**
+   * A transaction pooler's address for the same database (PgBouncer, Neon's `-pooler` host). Queries and NOTIFY go
+   * through it; LISTEN and the migrations' advisory lock, which need a session of their own, stay on `url`.
+   */
+  pooledUrl?: string;
 }
 
 export interface DatabaseHandle {
   db: Database;
   /** The postgres.js client, for LISTEN/NOTIFY (see `@agenteschat/adapters`); null on PGlite (one process). */
   client: postgres.Sql | null;
+  /** The client LISTEN goes through: `client`, or one on the direct address when queries go through a pooler. */
+  listener: postgres.Sql | null;
   /**
    * Applies pending migrations, after checking that the applied ones are
    * exactly this build's (`assertMigrationsMatch`). Processes booting
@@ -73,16 +80,23 @@ export const MIGRATIONS_LOCK = 4_242_017;
 export function createDatabase(options: DatabaseOptions): DatabaseHandle {
   const folder = pgliteFolder(options.url);
   if (folder) return createPgliteDatabase(folder);
-  const client = postgres(options.url, {
+  const pooled = options.pooledUrl && options.pooledUrl !== options.url ? options.pooledUrl : undefined;
+  const client = postgres(pooled ?? options.url, {
     max: options.poolMax,
     // Silence "relation already exists, skipping" notices from migrations.
     onnotice: () => {},
+    // A transaction pooler hands each statement any server connection: no named prepared statements, and no point
+    // holding idle connections to it.
+    ...(pooled && { prepare: false, idle_timeout: 20 }),
   });
+  // Opens nothing until `listen`, which then holds one connection of its own on the direct address.
+  const listener = pooled ? postgres(options.url, { max: 1, onnotice: () => {}, idle_timeout: 20 }) : client;
   const db = drizzle(client, { schema, casing: "snake_case", logger: tracingLogger });
   serializeDates(client);
   return {
     db: db as unknown as Database,
     client,
+    listener,
     migrate: async () => {
       // On a connection of its own: with a pool of one, the migrations need that one.
       const lock = postgres(options.url, { max: 1, onnotice: () => {} });
@@ -99,7 +113,10 @@ export function createDatabase(options: DatabaseOptions): DatabaseHandle {
     ping: async () => {
       await client`select 1`;
     },
-    close: () => client.end({ timeout: 5 }),
+    close: async () => {
+      if (listener !== client) await listener.end({ timeout: 5 });
+      await client.end({ timeout: 5 });
+    },
   };
 }
 
@@ -119,6 +136,7 @@ function createPgliteDatabase(folder: string): DatabaseHandle {
   return {
     db: db as unknown as Database,
     client: null,
+    listener: null,
     migrate: async () => {
       await ready;
       await assertMigrationsMatch(db as unknown as Database, migrationsFolder);

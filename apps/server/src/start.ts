@@ -217,7 +217,11 @@ async function boot(
     );
   }
 
-  const database = createDatabase({ url: config.DATABASE_URL, poolMax: config.DATABASE_POOL_MAX });
+  const database = createDatabase({
+    url: config.DATABASE_URL,
+    poolMax: config.DATABASE_POOL_MAX,
+    pooledUrl: config.DATABASE_POOLED_URL,
+  });
   await prepareDatabase(database, log, config.RUN_MIGRATIONS_ON_BOOT);
   // Best effort: a replica that boots before the migrations ran (RUN_MIGRATIONS_ON_BOOT=false) still starts.
   await retireHostTokens(database.db, config.HOST_COMPUTER_TOKEN).then(
@@ -239,10 +243,22 @@ async function boot(
   // The GIPHY key its owner may add in Settings (ADR 0091, amended 2026-10-31), made below once modules had their
   // say on the key wrappers; the GIF provider asks it on every call.
   let gifKey: GifKey | null = null;
+  const pgClient = database.client;
+  const pgListener = database.listener;
   const defaults: Adapters = {
     search: createPostgresSearchResolver(database.db),
     // PGlite (native mode) is one process: nothing to tell other replicas.
-    pubsub: database.client ? await createPostgresPubSub(postgresJsNotifier(database.client)) : createMemoryPubSub(),
+    pubsub:
+      pgClient && pgListener
+        ? await createPostgresPubSub(
+            postgresJsNotifier({
+              // LISTEN needs a session of its own: the direct address, when queries go through a pooler.
+              listen: (channel, fn, onlisten) => pgListener.listen(channel, fn, onlisten),
+              notify: (channel, payload) => pgClient.notify(channel, payload),
+              unsafe: (query, params) => pgClient.unsafe(query, params),
+            }),
+          )
+        : createMemoryPubSub(),
     presence: createMemoryPresence(),
     rateLimiter: createMemoryRateLimiter(),
     keyWrapper: localKeyWrapper,
