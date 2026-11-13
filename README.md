@@ -200,6 +200,8 @@ How to read it:
 - **Daemons are good.** They build from a monorepo root, start in about 11 seconds, keep their
   instance count across deploys and scale by a single REST call. A daemon that exits is restarted,
   so it has to ask to be scaled down.
+- **Pausing the project stops everything.** The web containers drained within minutes and the
+  daemon went to zero running instances. Its desired count is kept, so it starts again on unpause.
 - **Function sockets are cut about every five minutes.** Browsers reconnect quietly. A runner
   reconnects too, and each drop has side effects (see below).
 - **Builds add up.** About US$0.17 per deployment on average here, on a larger build machine that
