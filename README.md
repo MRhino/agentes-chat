@@ -33,8 +33,8 @@
 agentes.chat is built as **one long-running process** beside Postgres. This fork tried to run it on
 Vercel for one person, with no always-on machine, no always-on bill and no per-minute cron.
 
-- **It worked functionally.** Chat, agents, the job runner waking on demand and sleeping when idle
-  all ran on Vercel and Neon, in Sydney.
+- **The plumbing worked.** Chat, the job runner waking on demand and sleeping when idle all ran on
+  Vercel and Neon, in Sydney. Agents were barely exercised: three runs in total, one completed.
 - **It failed on cost and stability.** Vercel starts a new copy of the whole server for bursts of
   requests. One page load could start dozens of 2 GB containers, each billed for at least five
   minutes and each holding its own database connection. See [the blocker](#the-blocker-container-fan-out).
@@ -90,7 +90,8 @@ through the web function. The original plan put the runner inside the worker; th
 | --- | --- | --- |
 | ✅ | Daemon builds from the monorepo root and starts on demand | Scale 0 to 1, serving about 11 seconds later |
 | ✅ | Web role as a container function | UI, API and live chat work |
-| ✅ | Wake path, end to end | First message with the worker off woke it and the agent answered |
+| ✅ | Wake path | A message sent with the worker off woke it; the job was picked up 12 seconds later |
+| 🟡 | Agent runs | Three in total: one completed, two failed because no AI was connected yet |
 | ✅ | Worker idle sleep | Logged "no work: switching the job runner off" and scaled to 0 |
 | ✅ | Queries through the pooler | About 1.6 connections per container instead of about 4 |
 | ✅ | `maxConcurrency` applied to the container | Deployment inspect shows `maxConcurrency: 500` |
@@ -149,7 +150,8 @@ Three things follow from this:
 
 ## What it cost
 
-Vercel's bill for this project alone, from the first deploy to the pause, roughly 20 hours:
+Vercel's bill for this project alone, from the first deploy to the pause, roughly 20 hours. Figures
+are as reported at the pause; billing can lag.
 
 | Service | Quantity | Cost (US$) |
 | --- | ---: | ---: |
@@ -228,7 +230,7 @@ How to read it:
   over 100 places that queue a job. The web role needs a backstop check for waiting work, which is
   a form of the polling this project set out to avoid.
 - **A connected computer defeats scale-to-zero.** Its socket is cut every five minutes. Each cut
-  queues an "is it offline?" job due two minutes later, and that job wakes the worker: 156 times in
+  queues an "is it offline?" job due two minutes later, and that job wakes the worker if it is asleep: 156 such jobs in
   14 hours here, most of them overnight with nobody using the app.
 - **The default agent is tied to one computer.** It thinks with the AI sign-in on a single
   computer, and by design that never moves on its own. If that computer is offline, every
